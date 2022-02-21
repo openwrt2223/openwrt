@@ -15,6 +15,7 @@
 		led-failsafe = &led_orange;
 		led-running = &led_power;
 		led-upgrade = &led_orange;
+		label-mac-device = &eth0;
 	};
 
 	leds {
@@ -124,7 +125,7 @@
 			partition@60000 {
 				compatible = "denx,uimage";
 				label = "firmware";
-				reg = <0x060000 0xf20000>;
+				reg = <0x060000 0xfa0000>;
 			};
 		};
 	};

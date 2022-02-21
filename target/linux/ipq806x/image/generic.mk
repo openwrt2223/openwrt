@@ -142,6 +142,7 @@ define Device/linksys_ea7500-v1
 	IMAGE/factory.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | \
 		append-ubi | pad-to $$$$(PAGESIZE)
 	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct
+	DEFAULT := n
 endef
 TARGET_DEVICES += linksys_ea7500-v1
 
@@ -162,6 +163,7 @@ define Device/linksys_ea8500
 	IMAGE/factory.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | \
 		append-ubi
 	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct
+	DEFAULT := n
 endef
 TARGET_DEVICES += linksys_ea8500
 
@@ -242,6 +244,9 @@ define Device/netgear_d7800
 	BOARD_NAME := d7800
 	SUPPORTED_DEVICES += d7800
 	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct
+	DEVICE_COMPAT_VERSION := 2.0
+	DEVICE_COMPAT_MESSAGE := Sysupgrade does not work due to rootfs ubi partition size change. \
+		Use factory image with the TFTP recovery flash routine.
 endef
 TARGET_DEVICES += netgear_d7800
 
@@ -408,7 +413,7 @@ define Device/tplink_vr2600v
 	KERNEL_SUFFIX := -uImage
 	KERNEL = kernel-bin | append-dtb | uImage none
 	KERNEL_NAME := zImage
-	KERNEL_SIZE := 3072k
+	IMAGE_SIZE := 12672k
 	SOC := qcom-ipq8064
 	BLOCKSIZE := 128k
 	PAGESIZE := 2048
@@ -416,8 +421,7 @@ define Device/tplink_vr2600v
 	SUPPORTED_DEVICES += vr2600v
 	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct
 	IMAGE/sysupgrade.bin := pad-extra 512 | append-kernel | \
-		pad-to $$$$(KERNEL_SIZE) | append-rootfs | pad-rootfs | \
-		append-metadata
+		append-rootfs | pad-rootfs | append-metadata
 endef
 TARGET_DEVICES += tplink_vr2600v
 

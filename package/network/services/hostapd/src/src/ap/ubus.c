@@ -11,6 +11,7 @@
 #include "utils/eloop.h"
 #include "utils/wpabuf.h"
 #include "common/ieee802_11_defs.h"
+#include "common/hw_features_common.h"
 #include "hostapd.h"
 #include "neighbor_db.h"
 #include "wps_hostapd.h"
@@ -22,6 +23,7 @@
 #include "wnm_ap.h"
 #include "taxonomy.h"
 #include "airtime_policy.h"
+#include "hw_features.h"
 
 static struct ubus_context *ctx;
 static struct blob_buf b;
@@ -320,6 +322,16 @@ hostapd_bss_get_clients(struct ubus_context *ctx, struct ubus_object *obj,
 		for (i = 0; i < ARRAY_SIZE(sta->rrm_enabled_capa); i++)
 			blobmsg_add_u32(&b, "", sta->rrm_enabled_capa[i]);
 		blobmsg_close_array(&b, r);
+
+		r = blobmsg_open_array(&b, "extended_capabilities");
+		/* Check if client advertises extended capabilities */
+		if (sta->ext_capability && sta->ext_capability[0] > 0) {
+			for (i = 0; i < sta->ext_capability[0]; i++) {
+				blobmsg_add_u32(&b, "", sta->ext_capability[1 + i]);
+			}
+		}
+		blobmsg_close_array(&b, r);
+
 		blobmsg_add_u32(&b, "aid", sta->aid);
 #ifdef CONFIG_TAXONOMY
 		r = blobmsg_alloc_string_buffer(&b, "signature", 1024);
@@ -411,9 +423,15 @@ hostapd_bss_get_status(struct ubus_context *ctx, struct ubus_object *obj,
 	char ssid[SSID_MAX_LEN + 1];
 	char phy_name[17];
 	size_t ssid_len = SSID_MAX_LEN;
+	u8 channel = 0, op_class = 0;
 
 	if (hapd->conf->ssid.ssid_len < SSID_MAX_LEN)
 		ssid_len = hapd->conf->ssid.ssid_len;
+	
+	ieee80211_freq_to_channel_ext(hapd->iface->freq,
+				      hapd->iconf->secondary_channel,
+				      hostapd_get_oper_chwidth(hapd->iconf),
+				      &op_class, &channel);
 
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "status", hostapd_state_text(hapd->iface->state));
@@ -424,7 +442,8 @@ hostapd_bss_get_status(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_string(&b, "ssid", ssid);
 
 	blobmsg_add_u32(&b, "freq", hapd->iface->freq);
-	blobmsg_add_u32(&b, "channel", ieee80211_frequency_to_channel(hapd->iface->freq));
+	blobmsg_add_u32(&b, "channel", channel);
+	blobmsg_add_u32(&b, "op_class", op_class);
 	blobmsg_add_u32(&b, "beacon_interval", hapd->iconf->beacon_int);
 
 	snprintf(phy_name, 17, "%s", hapd->iface->phy);
@@ -794,6 +813,7 @@ hostapd_switch_chan(struct ubus_context *ctx, struct ubus_object *obj,
 	struct hostapd_data *hapd = get_hapd_from_object(obj);
 	struct hostapd_config *iconf = hapd->iface->conf;
 	struct hostapd_freq_params *freq_params;
+	struct hostapd_hw_modes *mode = hapd->iface->current_mode;
 	struct csa_settings css = {
 		.freq_params = {
 			.ht_enabled = iconf->ieee80211n,
@@ -802,6 +822,8 @@ hostapd_switch_chan(struct ubus_context *ctx, struct ubus_object *obj,
 			.sec_channel_offset = iconf->secondary_channel,
 		}
 	};
+	u8 chwidth = hostapd_get_oper_chwidth(iconf);
+	u8 seg0 = 0, seg1 = 0;
 	int ret = UBUS_STATUS_OK;
 	int i;
 
@@ -842,6 +864,35 @@ hostapd_switch_chan(struct ubus_context *ctx, struct ubus_object *obj,
 	SET_CSA_SETTING(CSA_VHT, freq_params.vht_enabled, bool);
 	SET_CSA_SETTING(CSA_HE, freq_params.he_enabled, bool);
 	SET_CSA_SETTING(CSA_BLOCK_TX, block_tx, bool);
+
+	css.freq_params.channel = hostapd_hw_get_channel(hapd, css.freq_params.freq);
+	if (!css.freq_params.channel)
+		return UBUS_STATUS_NOT_SUPPORTED;
+
+	switch (css.freq_params.bandwidth) {
+	case 160:
+		chwidth = CHANWIDTH_160MHZ;
+		break;
+	case 80:
+		chwidth = css.freq_params.center_freq2 ? CHANWIDTH_80P80MHZ : CHANWIDTH_80MHZ;
+		break;
+	default:
+		chwidth = CHANWIDTH_USE_HT;
+		break;
+	}
+
+	hostapd_set_freq_params(&css.freq_params, iconf->hw_mode,
+				css.freq_params.freq,
+				css.freq_params.channel, iconf->enable_edmg,
+				iconf->edmg_channel,
+				css.freq_params.ht_enabled,
+				css.freq_params.vht_enabled,
+				css.freq_params.he_enabled,
+				css.freq_params.sec_channel_offset,
+				chwidth, seg0, seg1,
+				iconf->vht_capab,
+				mode ? &mode->he_capab[IEEE80211_MODE_AP] :
+				NULL);
 
 	for (i = 0; i < hapd->iface->num_bss; i++) {
 		struct hostapd_data *bss = hapd->iface->bss[i];
@@ -1188,7 +1239,7 @@ hostapd_rrm_nr_set(struct ubus_context *ctx, struct ubus_object *obj,
 			memcpy(&ssid, s, ssid.ssid_len);
 		}
 
-		hostapd_neighbor_set(hapd, bssid, &ssid, data, NULL, NULL, 0);
+		hostapd_neighbor_set(hapd, bssid, &ssid, data, NULL, NULL, 0, 0);
 		wpabuf_free(data);
 		continue;
 
